@@ -1,0 +1,223 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("CASHIER") // ADMIN, CASHIER, ACCOUNTANT
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions     CashSession[]
+  transactions CashTransaction[] @relation("CreatedTransactions")
+  voidedTxns   CashTransaction[] @relation("VoidedTransactions")
+  sales        Sale[]
+
+  @@map("users")
+}
+
+model CashSession {
+  id                     String    @id @default(cuid())
+  userId                 String
+  user                   User      @relation(fields: [userId], references: [id])
+  openingBalance         Float     @default(0)
+  actualClosingBalance   Float?
+  expectedClosingBalance Float?
+  difference             Float?
+  status                 String    @default("OPEN") // OPEN, CLOSED
+  openedAt               DateTime  @default(now())
+  closedAt               DateTime?
+  notes                  String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  transactions CashTransaction[]
+  sales        Sale[]
+
+  @@map("cash_sessions")
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  type        String // CASH_IN, CASH_OUT
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  transactions CashTransaction[]
+
+  @@unique([name, type])
+  @@map("categories")
+}
+
+model CashTransaction {
+  id          String       @id @default(cuid())
+  sessionId   String?
+  session     CashSession? @relation(fields: [sessionId], references: [id])
+  type        String // CASH_IN, CASH_OUT
+  amount      Float
+  categoryId  String
+  category    Category     @relation(fields: [categoryId], references: [id])
+  paymentMode String       @default("CASH") // CASH, CARD, UPI, BANK_TRANSFER
+  referenceNo String?
+  note        String?
+
+  // Financial Link to POS Billing
+  saleId String? @unique
+  sale   Sale?   @relation(fields: [saleId], references: [id])
+
+  // Immutability & Void Audit
+  isVoided   Boolean   @default(false)
+  voidReason String?
+  voidedById String?
+  voidedBy   User?     @relation("VoidedTransactions", fields: [voidedById], references: [id])
+  voidedAt   DateTime?
+
+  createdById String
+  createdBy   User     @relation("CreatedTransactions", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([type])
+  @@index([paymentMode])
+  @@map("cash_transactions")
+}
+
+// ==========================================
+// MEDICAL STORE POS & INVENTORY EXTENSIONS
+// ==========================================
+
+model Supplier {
+  id            String   @id @default(cuid())
+  name          String
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  balanceDue    Float    @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  batches Batch[]
+
+  @@map("suppliers")
+}
+
+model Product {
+  id                   String   @id @default(cuid())
+  brandName            String // e.g. "Augmentin 625mg"
+  genericName          String? // e.g. "Amoxicillin + Clavulanic Acid"
+  dosageForm           String   @default("TABLET") // TABLET, CAPSULE, SYRUP, INJECTION, OINTMENT, DROPS, MEDICAL_DEVICE
+  strength             String? // e.g. "625mg", "120ml"
+  manufacturer         String? // e.g. "GSK", "Getz Pharma"
+  sku                  String?  @unique
+  barcode              String?  @unique
+  unit                 String   @default("Strip") // Strip, Box, Bottle, Piece, Ampoule
+  minStockLevel        Int      @default(10)
+  requiresPrescription Boolean  @default(false)
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  batches   Batch[]
+  saleItems SaleItem[]
+
+  @@index([brandName])
+  @@index([genericName])
+  @@map("products")
+}
+
+model Batch {
+  id              String    @id @default(cuid())
+  productId       String
+  product         Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batchNumber     String
+  expiryDate      DateTime
+  purchasePrice   Float // Cost price per unit
+  salePrice       Float // Retail price per unit
+  quantityInStock Int       @default(0)
+  supplierId      String?
+  supplier        Supplier? @relation(fields: [supplierId], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  saleItems SaleItem[]
+
+  @@unique([productId, batchNumber])
+  @@index([expiryDate])
+  @@map("batches")
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  name       String
+  phone      String?  @unique
+  doctorName String? // Attending physician / doctor reference
+  address    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  sales Sale[]
+
+  @@map("customers")
+}
+
+model Sale {
+  id            String       @id @default(cuid())
+  invoiceNumber String       @unique
+  sessionId     String?
+  session       CashSession? @relation(fields: [sessionId], references: [id])
+  customerId    String?
+  customer      Customer?    @relation(fields: [customerId], references: [id])
+
+  subtotal Float @default(0)
+  discount Float @default(0)
+  tax      Float @default(0)
+  total    Float @default(0)
+
+  paymentMode String @default("CASH") // CASH, CARD, UPI
+  status      String @default("COMPLETED") // COMPLETED, VOIDED, REFUNDED
+
+  // Link to Cash Ledger
+  cashTransaction CashTransaction?
+
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items SaleItem[]
+
+  @@index([createdAt])
+  @@index([invoiceNumber])
+  @@map("sales")
+}
+
+model SaleItem {
+  id        String   @id @default(cuid())
+  saleId    String
+  sale      Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  batchId   String?
+  batch     Batch?   @relation(fields: [batchId], references: [id])
+  quantity  Int
+  unitPrice Float
+  subtotal  Float
+  createdAt DateTime @default(now())
+
+  @@map("sale_items")
+}
