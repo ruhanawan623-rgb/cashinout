@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cashinout",
+  "compatibility_date": "2026-09-16",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "build": {
+    "command": "npx opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion"
+  }
+}
